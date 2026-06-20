@@ -5,8 +5,67 @@ from collections import Counter
 import re
 import json
 import os
+import pandas as pd
 
-# 页面配置
+# ========== AI分析函数（必须在UI之前定义）==========
+def ai_analyze(text):
+    """AI文本分析：情感分析、关键词提取、风险定级"""
+    # 使用jieba进行分词和关键词提取
+    words = list(jieba.cut(text))
+    
+    # 情感词典（简化版）
+    positive_words = {'好', '优秀', '满意', '感谢', '支持', '赞', '棒', '不错', '喜欢', '成功', '顺利', '方便', '舒适', '安全'}
+    negative_words = {'差', '糟糕', '不满', '投诉', '问题', '故障', '危险', '困难', '麻烦', '失望', '愤怒', '担心', '害怕', '烦', '坏', '慢', '贵'}
+    
+    pos_count = sum(1 for w in words if w in positive_words)
+    neg_count = sum(1 for w in words if w in negative_words)
+    
+    if pos_count > neg_count:
+        sentiment = "正面"
+    elif neg_count > pos_count:
+        sentiment = "负面"
+    else:
+        sentiment = "中性"
+    
+    # 提取关键词
+    keywords = jieba.analyse.extract_tags(text, topK=3, withWeight=False)
+    key_word = "、".join(keywords) if keywords else "暂无明确诉求"
+    
+    # 风险定级
+    urgent_words = {'紧急', '危险', '事故', '伤亡', '爆炸', '火灾', '漏电', '坍塌', '中毒'}
+    high_risk_words = {'严重', '多次', '长期', '普遍', '群体', '聚集', '上访'}
+    
+    urgent_count = sum(1 for w in words if w in urgent_words)
+    high_risk_count = sum(1 for w in words if w in high_risk_words)
+    
+    if urgent_count > 0:
+        level = "🔴 一级（紧急）"
+    elif high_risk_count > 0 or neg_count >= 3:
+        level = "🟠 二级（高风险）"
+    elif neg_count > 0:
+        level = "🟡 三级（中风险）"
+    else:
+        level = "🟢 四级（低风险）"
+    
+    return {
+        "sentiment": sentiment,
+        "key_word": key_word,
+        "level": level
+    }
+
+def generate_wordcloud_data(text):
+    """生成词云数据"""
+    # 使用jieba提取关键词和权重
+    keywords = jieba.analyse.extract_tags(text, topK=20, withWeight=True)
+    
+    # 转换为词云需要的格式
+    word_list = []
+    for word, weight in keywords:
+        word_list.append([word, int(weight * 1000)])
+    
+    return word_list
+
+# ========== 页面配置 ==========
 st.set_page_config(
     page_title="AI驱动·城市民生大数据智能分析平台",
     page_icon="📊",
@@ -14,7 +73,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 自定义CSS样式
+# ========== 自定义CSS样式 ==========
 st.markdown("""
 <style>
     .main-title {
@@ -43,13 +102,6 @@ st.markdown("""
         margin-top: 15px;
         border-left: 4px solid #2196f3;
     }
-    .metric-card {
-        background: white;
-        border-radius: 10px;
-        padding: 20px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        text-align: center;
-    }
     .stButton>button {
         background-color: #2d5bcc;
         color: white;
@@ -64,19 +116,10 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(45, 92, 204, 0.3);
     }
-    .stTextInput>div>div>input {
-        border-radius: 8px;
-        border: 2px solid #e0e0e0;
-        padding: 12px;
-    }
-    .stTextInput>div>div>input:focus {
-        border-color: #2d5bcc;
-        box-shadow: 0 0 0 3px rgba(45, 92, 204, 0.1);
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# 标题
+# ========== 标题 ==========
 st.markdown('<h1 class="main-title">AI驱动·城市民生大数据智能分析平台</h1>', unsafe_allow_html=True)
 
 # ========== 1. 大数据来源区块 ==========
@@ -142,8 +185,9 @@ with col_left:
             result = ai_analyze(text_input)
         
         st.markdown('<div class="result-box">', unsafe_allow_html=True)
+        sentiment_color = 'green' if result['sentiment'] == '正面' else 'red' if result['sentiment'] == '负面' else 'orange'
         st.markdown(f"""
-        **🎯 情感倾向：** <span style="color: {'green' if result['sentiment'] == '正面' else 'red' if result['sentiment'] == '负面' else 'orange'}">{result['sentiment']}</span>
+        **🎯 情感倾向：** <span style="color: {sentiment_color}">{result['sentiment']}</span>
         
         **🔑 核心诉求：** {result['key_word']}
         
@@ -161,7 +205,6 @@ with col_right:
     st.markdown("### 📈 舆情热度统计 & AI聚类词云")
     
     # 热度统计图表
-    import pandas as pd
     chart_data = pd.DataFrame({
         '类别': ['物价', '交通', '教育', '物业', '水电'],
         '热度指数': [1280, 2150, 960, 1830, 1540]
@@ -216,64 +259,6 @@ with st.container():
         """)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ========== AI分析函数 ==========
-def ai_analyze(text):
-    """AI文本分析：情感分析、关键词提取、风险定级"""
-    # 使用jieba进行分词和关键词提取
-    words = list(jieba.cut(text))
-    
-    # 情感词典（简化版）
-    positive_words = {'好', '优秀', '满意', '感谢', '支持', '赞', '棒', '不错', '喜欢', '成功', '顺利', '方便', '舒适', '安全'}
-    negative_words = {'差', '糟糕', '不满', '投诉', '问题', '故障', '危险', '困难', '麻烦', '失望', '愤怒', '担心', '害怕', '烦', '坏', '慢', '贵'}
-    
-    pos_count = sum(1 for w in words if w in positive_words)
-    neg_count = sum(1 for w in words if w in negative_words)
-    
-    if pos_count > neg_count:
-        sentiment = "正面"
-    elif neg_count > pos_count:
-        sentiment = "负面"
-    else:
-        sentiment = "中性"
-    
-    # 提取关键词
-    keywords = jieba.analyse.extract_tags(text, topK=3, withWeight=False)
-    key_word = "、".join(keywords) if keywords else "暂无明确诉求"
-    
-    # 风险定级
-    urgent_words = {'紧急', '危险', '事故', '伤亡', '爆炸', '火灾', '漏电', '坍塌', '中毒'}
-    high_risk_words = {'严重', '多次', '长期', '普遍', '群体', '聚集', '上访'}
-    
-    urgent_count = sum(1 for w in words if w in urgent_words)
-    high_risk_count = sum(1 for w in words if w in high_risk_words)
-    
-    if urgent_count > 0:
-        level = "🔴 一级（紧急）"
-    elif high_risk_count > 0 or neg_count >= 3:
-        level = "🟠 二级（高风险）"
-    elif neg_count > 0:
-        level = "🟡 三级（中风险）"
-    else:
-        level = "🟢 四级（低风险）"
-    
-    return {
-        "sentiment": sentiment,
-        "key_word": key_word,
-        "level": level
-    }
-
-def generate_wordcloud_data(text):
-    """生成词云数据"""
-    # 使用jieba提取关键词和权重
-    keywords = jieba.analyse.extract_tags(text, topK=20, withWeight=True)
-    
-    # 转换为词云需要的格式
-    word_list = []
-    for word, weight in keywords:
-        word_list.append([word, int(weight * 1000)])
-    
-    return word_list
-
-# 页脚
+# ========== 页脚 ==========
 st.markdown("---")
 st.markdown("<p style='text-align: center; color: #666;'>AI大数据民生舆情分析平台 | Powered by Streamlit & Jieba</p>", unsafe_allow_html=True)
